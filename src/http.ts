@@ -151,7 +151,9 @@ async function handleSessionRequest(request: Request, response: Response) {
   }
 }
 
-app.get("/mcp", handleSessionRequest);
+app.get("/mcp", (_request: Request, response: Response) => {
+  response.status(405).set("Allow", "POST, DELETE").send("Method Not Allowed");
+});
 app.delete("/mcp", handleSessionRequest);
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
