@@ -3,10 +3,27 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const endpoint =
   process.env.ARCHIMEDES_MCP_HTTP_URL ?? "http://127.0.0.1:18081/mcp";
+const KNOWN_ASSET = "1878153b-096a-486e-ac6b-7197346bdff2";
+const KNOWN_BOUNTY = "5586f0c8-cde1-416c-ac28-d85bc6a264f0";
 const client = new Client({
   name: "archimedes-http-acceptance",
   version: "1.0.0"
 });
+
+function assertSuccessful(name, response) {
+  if (response.isError) {
+    throw new Error(`${name} failed: ${response.content?.[0]?.text ?? "error"}`);
+  }
+  const text = response.content?.find((part) => part.type === "text")?.text;
+  if (!text) {
+    throw new Error(`${name} returned no text result.`);
+  }
+  const parsed = JSON.parse(text);
+  if (parsed === null || (Array.isArray(parsed) && parsed.length === 0)) {
+    throw new Error(`${name} returned no results.`);
+  }
+  process.stdout.write(`PASS ${name}\n`);
+}
 
 try {
   await client.connect(
@@ -23,14 +40,17 @@ try {
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     throw new Error(`Unexpected tool set: ${names.join(", ")}`);
   }
-  const result = await client.callTool({
-    name: "search_assets",
-    arguments: { query: "Python", limit: 1 }
-  });
-  if (result.isError) {
-    throw new Error(result.content?.[0]?.text ?? "search_assets failed");
+  process.stdout.write("PASS tool discovery\n");
+  const tests = [
+    ["search_assets", { query: "Python", limit: 3 }],
+    ["get_asset", { asset_id: KNOWN_ASSET }],
+    ["search_bounties", { query: "MCP", limit: 3 }],
+    ["get_bounty", { bounty_id: KNOWN_BOUNTY }]
+  ];
+  for (const [name, args] of tests) {
+    const result = await client.callTool({ name, arguments: args });
+    assertSuccessful(name, result);
   }
-  process.stdout.write("PASS streamable HTTP transport\n");
 } finally {
   await client.close();
 }

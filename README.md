@@ -130,6 +130,10 @@ automatically; the server binds to the assigned port and permits only that
 hostname. Set the service health check to `/health`. The public MCP endpoint is
 `https://<service-name>.onrender.com/mcp`.
 
+The reference deployment is available at
+`https://archimedes-assistant-mcp.onrender.com/mcp`, with its health check at
+`https://archimedes-assistant-mcp.onrender.com/health`.
+
 The free instance may sleep after inactivity. Its first request after sleeping
 can take longer while the instance starts.
 
