@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: archimedes-assistant-mcp
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: ARCHIMEDES_TIMEOUT_MS
+        value: "10000"

@@ -1,0 +1,11 @@
+.git
+.venv
+coverage
+dist
+node_modules
+output
+release
+tmp
+*.log
+*.tgz
+*.zip

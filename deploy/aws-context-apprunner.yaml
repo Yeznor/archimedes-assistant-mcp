@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Archimedes TensorFlow context ranker on AWS App Runner
+
+Parameters:
+  ImageRepository:
+    Type: String
+    Description: ECR image URI, including an immutable tag or digest
+
+Resources:
+  EcrAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - build.apprunner.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  ContextRankerService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      HealthCheckConfiguration:
+        Path: /health
+        Protocol: HTTP
+        HealthyThreshold: 1
+        UnhealthyThreshold: 3
+        Interval: 10
+        Timeout: 5
+      SourceConfiguration:
+        AutoDeploymentsEnabled: false
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt EcrAccessRole.Arn
+        ImageRepository:
+          ImageIdentifier: !Ref ImageRepository
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: "8080"
+            RuntimeEnvironmentVariables:
+              PORT: "8080"
+
+Outputs:
+  ServiceUrl:
+    Value: !Sub "https://${ContextRankerService.ServiceUrl}"

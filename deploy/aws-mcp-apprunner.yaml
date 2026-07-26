@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Archimedes MCP Streamable HTTP server on AWS App Runner
+
+Parameters:
+  ImageRepository:
+    Type: String
+    Description: ECR image URI, including an immutable tag or digest
+  ContextRankerUrl:
+    Type: String
+    Default: ""
+    Description: Optional HTTPS URL for the TensorFlow context ranker
+  AllowedHosts:
+    Type: String
+    Description: Comma-separated public hostnames accepted by the MCP service
+
+Resources:
+  EcrAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - build.apprunner.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  McpService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      HealthCheckConfiguration:
+        Path: /health
+        Protocol: HTTP
+        HealthyThreshold: 1
+        UnhealthyThreshold: 3
+        Interval: 10
+        Timeout: 5
+      SourceConfiguration:
+        AutoDeploymentsEnabled: false
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt EcrAccessRole.Arn
+        ImageRepository:
+          ImageIdentifier: !Ref ImageRepository
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: "3000"
+            RuntimeEnvironmentVariables:
+              PORT: "3000"
+              MCP_HOST: 0.0.0.0
+              MCP_ALLOWED_HOSTS: !Ref AllowedHosts
+              ARCHIMEDES_API_URL: https://archimedes.market
+              ARCHIMEDES_CONTEXT_URL: !Ref ContextRankerUrl
+
+Outputs:
+  McpEndpoint:
+    Value: !Sub "https://${McpService.ServiceUrl}/mcp"
