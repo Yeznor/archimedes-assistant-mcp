@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { Request, Response } from "express";
 import { ArchimedesClient } from "./client.js";
 import { createServer } from "./server.js";
@@ -60,45 +62,97 @@ app.get("/health", (_request: Request, response: Response) => {
   });
 });
 
+type ActiveSession = {
+  server: ReturnType<typeof createServer>;
+  transport: StreamableHTTPServerTransport;
+};
+
+const sessions = new Map<string, ActiveSession>();
+
+function requestSessionId(request: Request): string | undefined {
+  const header = request.headers["mcp-session-id"];
+  return Array.isArray(header) ? header[0] : header;
+}
+
+function reportRequestError(error: unknown, response: Response): void {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`MCP HTTP request failed: ${message}\n`);
+  if (!response.headersSent) {
+    response.status(500).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32603,
+        message: "Internal server error"
+      },
+      id: null
+    });
+  }
+}
+
 app.post("/mcp", async (request: Request, response: Response) => {
-  const server = createServer(makeClient());
-  const transport = new StreamableHTTPServerTransport();
-  response.on("close", () => {
-    void transport.close();
-    void server.close();
-  });
   try {
-    await server.connect(transport as unknown as Transport);
-    await transport.handleRequest(request, response, request.body);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`MCP HTTP request failed: ${message}\n`);
-    if (!response.headersSent) {
-      response.status(500).json({
-        jsonrpc: "2.0",
-        error: {
-          code: -32603,
-          message: "Internal server error"
-        },
-        id: null
-      });
+    const sessionId = requestSessionId(request);
+    const existing = sessionId ? sessions.get(sessionId) : undefined;
+    if (existing) {
+      await existing.transport.handleRequest(request, response, request.body);
+      return;
     }
+    if (!sessionId && isInitializeRequest(request.body)) {
+      const server = createServer(makeClient());
+      let transport: StreamableHTTPServerTransport;
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: randomUUID,
+        enableJsonResponse: true,
+        onsessioninitialized: (newSessionId) => {
+          sessions.set(newSessionId, { server, transport });
+        }
+      });
+      transport.onclose = () => {
+        const closedSessionId = transport.sessionId;
+        if (closedSessionId) {
+          sessions.delete(closedSessionId);
+        }
+      };
+      await server.connect(transport as unknown as Transport);
+      await transport.handleRequest(request, response, request.body);
+      return;
+    }
+    response.status(400).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Missing or invalid MCP session."
+      },
+      id: null
+    });
+  } catch (error) {
+    reportRequestError(error, response);
   }
 });
 
-function methodNotAllowed(_request: Request, response: Response) {
-  response.status(405).json({
-    jsonrpc: "2.0",
-    error: {
-      code: -32000,
-      message: "Method not allowed."
-    },
-    id: null
-  });
+async function handleSessionRequest(request: Request, response: Response) {
+  const sessionId = requestSessionId(request);
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (!session) {
+    response.status(400).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Missing or invalid MCP session."
+      },
+      id: null
+    });
+    return;
+  }
+  try {
+    await session.transport.handleRequest(request, response);
+  } catch (error) {
+    reportRequestError(error, response);
+  }
 }
 
-app.get("/mcp", methodNotAllowed);
-app.delete("/mcp", methodNotAllowed);
+app.get("/mcp", handleSessionRequest);
+app.delete("/mcp", handleSessionRequest);
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 if (!Number.isFinite(port) || port < 1 || port > 65_535) {
